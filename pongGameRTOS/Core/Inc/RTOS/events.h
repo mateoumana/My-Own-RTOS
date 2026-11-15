@@ -3,6 +3,7 @@
 
 //inclusion de librerias .h
 #include "myTypes.h"
+#include "queue.h"
 
 //definiciones publicas y errores
 #ifndef EVENT_BASE_ERROR

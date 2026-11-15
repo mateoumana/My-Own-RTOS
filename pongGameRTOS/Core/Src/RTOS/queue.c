@@ -96,3 +96,17 @@ u16 queuePeek(queueHandle_t queue, queueElementHandle_t element){
 	portableEnableInterrupts();
 	return QUEUE_OK;
 }
+
+u16 queueCopy(queueHandle_t queueSource, queueHandle_t queueDest){
+	portableDisableInterrupts();//se debe proteger la edicion de la cola para que una interrupcion no la corrompa
+	if(queueSource == NULL || queueDest == NULL){
+		portableEnableInterrupts();
+		return QUEUE_ERROR_NULL_PARAM;
+	}
+
+	queueDest->head = queueSource->head;
+	queueDest->tail = queueSource->tail;
+	queueDest->size = queueSource->size;
+	portableEnableInterrupts();
+	return QUEUE_OK;
+}

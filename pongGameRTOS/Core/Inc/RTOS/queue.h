@@ -53,5 +53,6 @@ u16 dequeue(queueHandle_t queue, queueElementHandle_t *element);
 u16 enqueue(queueHandle_t queue, queueElementHandle_t element);
 u16 getQueueSize(queueHandle_t queue);
 u16 queuePeek(queueHandle_t queue, queueElementHandle_t element);//para observar el head
+u16 queueCopy(queueHandle_t queueSource, queueHandle_t queueDest);//copia el contenido de una cola a otra
 
 #endif
