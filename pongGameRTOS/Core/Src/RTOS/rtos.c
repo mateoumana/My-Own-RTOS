@@ -1,11 +1,7 @@
 /*******************************************************
  *             INCLUSION LIBRERIAS .h                  *
  *******************************************************/
- 
-#include "Scheduler.h"
 #include "common.h"
-#include "portable.h"
-#include "rtos.h"
  
 /*******************************************************
  *         DEFINICIONES PRIVADAS DEL RTOS          *

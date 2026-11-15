@@ -11,12 +11,19 @@
 
 //definicion funciones publicas
 
-u16 semaphoreInit(semaphoreHandler_t semaphore, u16 initialCount){
-    if(semaphore != NULL){
-        semaphore->busy = 0;
-        return queueInit(&semaphore->waitQueue);
+u16 semaphoreInit(semaphoreHandler_t semaphore, u16 maxCount, u16 initialCount){
+    if(semaphore == NULL){
+        return SEMAPHORE_ERROR_NULL_PARAM;
     }
-    return SEMAPHORE_ERROR_NULL_PARAM;
+    if(maxCount == 0){
+        return SEMAPHORE_ERROR_INVALID_PARAM;
+    }
+    if(initialCount > maxCount){
+        initialCount = maxCount; //limitar el valor inicial al valor maximo
+    }
+    semaphore->count = initialCount;
+    semaphore->maxCount = maxCount;
+    return queueInit(&semaphore->waitQueue);
 }
 
 u16 semaphoreLock(semaphoreHandler_t semaphore){//take
@@ -24,7 +31,7 @@ u16 semaphoreLock(semaphoreHandler_t semaphore){//take
     if(semaphore != NULL){
         u8 callScheduler = FALSE;
         portableDisableInterrupts();
-        if(semaphore->count > semaphore->maxCount){
+        if(semaphore->count >= semaphore->maxCount){
             TCBHandle_t currentTask = schedulerGetCurrentTask();
             if(currentTask != NULL){
                 currentTask->taskStatus = TASK_BLOCKED;
@@ -55,8 +62,7 @@ u16 semaphoreUnlock(semaphoreHandler_t semaphore){//release
     if(semaphore != NULL){
         u8 callScheduler = FALSE;
         portableDisableInterrupts();
-        if(semaphore->count > 0){
-            semaphore->count--;
+        if(semaphore->count >= semaphore->maxCount){
             if(getQueueSize(&semaphore->waitQueue) > 0){
                 queueElementHandle_t element = NULL;
                 res = dequeue(&semaphore->waitQueue, &element);
@@ -81,10 +87,15 @@ u16 semaphoreUnlock(semaphoreHandler_t semaphore){//release
                     }
                 }
             } else{
-                semaphore->busy = FALSE;
+                if(semaphore->count > 0){
+                    semaphore->count--;
+                }
                 res = SEMAPHORE_OK;
             }
         }else{
+            if(semaphore->count > 0){
+                semaphore->count--;
+            }
             res = SEMAPHORE_OK;
         }
         portableEnableInterrupts();
@@ -97,8 +108,8 @@ u16 semaphoreUnlock(semaphoreHandler_t semaphore){//release
 
 
 u16 semaphoreGetCount(semaphoreHandler_t semaphore){
- u16 res = 0;
- portableDisableInterrupts();
+    u16 res = 0;
+    portableDisableInterrupts();
     if(semaphore != NULL){
         res = semaphore->count;
     }

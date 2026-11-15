@@ -24,13 +24,13 @@ u16 MutexLock(MutexHandler_t mutex){//take
         u8 callScheduler = FALSE;
         portableDisableInterrupts();
         if(mutex->busy){
-            TCBHandle_t currentTask = schedulerGetCurrentTask();
+            TCBHandle_t currentTask = schedulerGetCurrentTask();//tomar la tarea actual y ponerla en bloqueo para que espere a que se libere el mutex
             if(currentTask != NULL){
                 currentTask->taskStatus = TASK_BLOCKED;
                 currentTask->taskQueueElement.data = (pv)currentTask;
                 res = enqueue(&mutex->waitQueue, &currentTask->taskQueueElement);
                 if(res != QUEUE_OK){
-                    currentTask->taskStatus = TASK_RUNNING;
+                    currentTask->taskStatus = TASK_RUNNING;//si no se puedo encolar, se vuelve a poner la tarea en estado de ejecucion
                 } else {
                     callScheduler = TRUE;
                 }
@@ -50,7 +50,7 @@ u16 MutexLock(MutexHandler_t mutex){//take
 }
 
 u16 MutexUnlock(MutexHandler_t mutex){//release
-u16 res = MUTEX_ERROR_NULL_PARAM;
+    u16 res = MUTEX_ERROR_NULL_PARAM;
     if(mutex != NULL){
         u8 callScheduler = FALSE;
         portableDisableInterrupts();

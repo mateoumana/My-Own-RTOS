@@ -1,5 +1,4 @@
 #include "common.h"
-#include "portable.h"
 
 //inclusion de librerias .h
 

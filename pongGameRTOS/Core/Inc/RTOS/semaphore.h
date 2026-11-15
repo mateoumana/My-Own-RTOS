@@ -43,7 +43,7 @@ typedef struct semaphore{
 }semaphore_t, * semaphoreHandler_t;
 
 //funciones publicas
-u16 semaphoreInit(semaphoreHandler_t semaphore, u16 initialCount);
+u16 semaphoreInit(semaphoreHandler_t semaphore, u16 maxCount, u16 initialCount);
 u16 semaphoreLock(semaphoreHandler_t semaphore);
 u16 semaphoreUnlock(semaphoreHandler_t semaphore);
 u16 semaphoreGetCount(semaphoreHandler_t semaphore);

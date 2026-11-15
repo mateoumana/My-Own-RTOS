@@ -1,6 +1,4 @@
 #include "common.h"
-#include "Task.h"
-#include "portable.h"
 
 //inclusion de librerias .h
 extern TCBHandle_t taskGetIdleTask(void);//accedemos a la funcion definida en task.c, oara ser usada no puede ser definida como static
