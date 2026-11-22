@@ -81,10 +81,76 @@ u16 eventsSetEvent(eventHandler_t event, u16 bits){
 }
 
 
-/*u16 eventsClearEvent(eventHandler_t event, u16 bits){}
+u16 eventsClearEvent(eventHandler_t event, u16 bits){
+    u16 res = EVENT_ERROR_NULL_PARAM;
+    if(event != NULL){
+        portableDisableInterrupts();
+        bits = ~bits;
+        event->events &= bits;
+        event->events &= EVENTS_WAIT_TYPE_MASK; //limitar a 15 bits
+        portableEnableInterrupts();
+        res = EVENT_OK;
+    }
+    return res;
+}
 
 
-u16 eventsWaitAny(eventHandler_t event, u16 bits){}
+u16 eventsWaitAny(eventHandler_t event, u16 bits){
+    u16 res = EVENT_ERROR_NULL_PARAM;
+    if(event != NULL){
+        bits &= EVENTS_WAIT_TYPE_MASK; //limitar a 15 bits
+        if(bits){
+            portableDisableInterrupts();
+            TCBHandle_t currentTask = schedulerGetCurrentTask();
+            if(currentTask != NULL){
+                currentTask->taskEvents = bits;
+                currentTask->taskStatus = TASK_BLOCKED;
+                res = enqueue(&event->waitQueue, &currentTask->taskQueueElement);
+                if(res != QUEUE_OK){
+                    currentTask->taskEvents = 0;
+                    currentTask->taskStatus = TASK_RUNNING;
+                }
+            } else {
+                res = EVENT_ERROR_INVALID_STATE;
+            }
+            portableEnableInterrupts();
+            if(res == QUEUE_OK){
+                portableCallScheduller();
+            }
+        } else {
+            res = EVENT_ERROR_INVALID_PARAM;
+        }
+    }
+    return res;
+}
 
 
-u16 eventsWaitAll(eventHandler_t event, u16 bits){}*/
+u16 eventsWaitAll(eventHandler_t event, u16 bits){
+    u16 res = EVENT_ERROR_NULL_PARAM;
+    if(event != NULL){
+        bits &= EVENTS_WAIT_TYPE_MASK; //limitar a 15 bits
+        if(bits){
+            portableDisableInterrupts();
+            TCBHandle_t currentTask = schedulerGetCurrentTask();
+            if(currentTask != NULL){
+                currentTask->taskEvents = bits;
+                currentTask->taskEvents |= EVENTS_WAIT_TYPE_BIT; //indicar que se espera a todos los bits
+                currentTask->taskStatus = TASK_BLOCKED;
+                res = enqueue(&event->waitQueue, &currentTask->taskQueueElement);
+                if(res != QUEUE_OK){
+                    currentTask->taskEvents = 0;
+                    currentTask->taskStatus = TASK_RUNNING;
+                }
+            } else {
+                res = EVENT_ERROR_INVALID_STATE;
+            }
+            portableEnableInterrupts();
+            if(res == QUEUE_OK){
+                portableCallScheduller();
+            }
+        } else {
+            res = EVENT_ERROR_INVALID_PARAM;
+        }
+    }
+    return res;
+}
