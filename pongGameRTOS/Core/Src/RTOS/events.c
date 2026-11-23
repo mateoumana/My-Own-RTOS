@@ -50,7 +50,7 @@ u16 eventsSetEvent(eventHandler_t event, u16 bits){
                                     taskToWakeUp = NULL;
                                 }
                             } else {
-                                if(taskToWakeUp->taskEvents | event->events){
+                                if(taskToWakeUp->taskEvents & event->events){
                                     res = schedulerAddTaskToReadyQueue(taskToWakeUp);
                                     if(currentTask != NULL){
                                         if(taskToWakeUp->taskPriority < currentTask->taskPriority){
@@ -95,6 +95,14 @@ u16 eventsClearEvent(eventHandler_t event, u16 bits){
 }
 
 
+/***
+ * @brief Waits for any of the specified events to occur, for example, if the event handler has bits 0 and 1 set, 
+ * and the task is waiting for either bit 0 or bit 1, it will be unblocked when either of those events occurs.
+ * @details This function blocks the current task until any of the specified events occur.
+ * @param event Event handler
+ * @param bits Bits representing the events to wait for
+ * @return Result of the operation
+ */
 u16 eventsWaitAny(eventHandler_t event, u16 bits){
     u16 res = EVENT_ERROR_NULL_PARAM;
     if(event != NULL){
@@ -125,6 +133,14 @@ u16 eventsWaitAny(eventHandler_t event, u16 bits){
 }
 
 
+/***
+ * @brief Waits for all of the specified events to occur. For example, if the event handler has bits 0 and 1 set, 
+ * the task has to wait for both bit 0 and bit 1. It will be unblocked only when both events occur.
+ * @details This function blocks the current task until all of the specified events occur.
+ * @param event Event handler
+ * @param bits Bits representing the events to wait for
+ * @return Result of the operation
+ */
 u16 eventsWaitAll(eventHandler_t event, u16 bits){
     u16 res = EVENT_ERROR_NULL_PARAM;
     if(event != NULL){

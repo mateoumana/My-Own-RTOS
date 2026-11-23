@@ -44,8 +44,8 @@
  *       DEFINICIONES PUBLICAS DEL _PORTABLE_H_        *
  *******************************************************/
  
-//#define PORTABLE_RTOS_SYSTEM_CLOCK              16000000U
-#define PORTABLE_RTOS_SYSTEM_CLOCK  4000000UL   /* MSI por defecto */
+#define PORTABLE_RTOS_SYSTEM_CLOCK              80000000UL //PLLCLK, HCLK = 80 MHz
+//#define PORTABLE_RTOS_SYSTEM_CLOCK            4000000UL   /* MSI por defecto */
  
 /*******************************************************
  *           TIPOS PUBLICOS DEL _PORTABLE_H_           *
