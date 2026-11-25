@@ -60,16 +60,18 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 // ---------------- Hardware ----------------
-// Botón START/STOP (activo en bajo, pull-up interno)
-#define BUTTON_PORT             GPIOA
-#define BUTTON_PIN              GPIO_PIN_8    // PA8 - D7
+// Botón START/STOP (activo en bajo). Configurado en CubeMX:
+// PA8 (D7) -> GPIO_Input, Pull-up, User Label = BTN_START
+#define BUTTON_PORT             BTN_START_GPIO_Port
+#define BUTTON_PIN              BTN_START_Pin
 #define BUTTON_DEBOUNCE_SAMPLES 3U            // lecturas iguales seguidas
 
 // Joysticks (solo eje Y) -> ADC1
 #define JOY1_ADC_CHANNEL        ADC_CHANNEL_5 // PA0 - A0
 #define JOY2_ADC_CHANNEL        ADC_CHANNEL_6 // PA1 - A1
-#define JOY_INVERT_Y            0             // pon 1 si la paleta se mueve al revés
-#define JOY_DEADZONE            300           // zona muerta alrededor del centro (cuentas ADC)
+#define JOY_CENTER              2048          // centro teórico del ADC de 12 bits
+#define JOY_MARGIN              600           // margen alrededor del centro
+#define JOY_INVERT_Y            1             // 0/1 si la paleta se mueve al revés
 
 // Buzzer -> TIM2 CH3 en PB10 (D6), PWM al 50 %
 #define BUZZER_TIMER            htim2         //htim2 es el handler del TIMER2, este define es un alias
@@ -84,24 +86,18 @@ typedef struct {
 #define SCREEN_W                SSD1306_WIDTH   // 128
 #define SCREEN_H                SSD1306_HEIGHT  // 64
 
-#define FP_SHIFT                8               // tamaño de la parte fraccionaria (Q8)
-#define TO_FP(px)               ((s32)(px) << FP_SHIFT)
-#define FROM_FP(v)              ((s32)(v) >> FP_SHIFT)
-
 #define PADDLE_W                2                           // width of the paddle in pixels
 #define PADDLE_H                14                          // height of the paddle in pixels
 #define PADDLE_LEFT_X           2                           // initial x position of the left paddle
 #define PADDLE_RIGHT_X          (SCREEN_W - 2 - PADDLE_W)   // initial x position of the right paddle
-#define PADDLE_MAX_SPEED        TO_FP(3)                    // 3 px por frame como maximo de velocidad (Q8)
+#define PADDLE_SPEED            2   // px por frame al mover el joystick
 
-#define BALL_SIZE               2
-#define BALL_START_SPEED        384                         // 1.5 px/frame (Q8)
-#define BALL_SPEED_STEP         24                          // aceleración en cada golpe
-#define BALL_MAX_SPEED          896                         // 3.5 px/frame (Q8)
-#define BALL_MAX_VY             512                         // 2 px/frame (Q8)
+#define BALL_SIZE               2   // bola de 2x2 px
+#define BALL_SPEED_X            2   // px por frame en horizontal (constante)
+#define BALL_SPEED_Y            1   // px por frame en vertical (+1 o -1)
 
-#define SERVE_DELAY_FRAMES      30U                         // después de cada punto, la bola desaparece durante 30 frames. A 30 FPS eso es 30 / 30 = 1 segundo para que los jugadores se preparen
-#define WIN_SCORE               5U                          // el primero que llega a 5 gana y se pasa a la pantalla de fin del juego.s
+#define SERVE_DELAY_FRAMES      30U // después de cada punto, la bola desaparece durante 30 frames. A 30 FPS eso es 30 / 30 = 1 segundo para que los jugadores se preparen
+#define WIN_SCORE               5U  // el primero que llega a 5 gana y se pasa a la pantalla de fin del juego.s
 
 // ---------------- Mascaras de Eventos ----------------
 // Grupo inputEvents (InputTask -> GameTask)
@@ -161,8 +157,6 @@ static event_t soundEvents;    // efectos de sonido
 static game_t  game;           
 static input_t input;   
 
-// ---- Calibración de joysticks (se escribe antes de arrancar el RTOS) ----
-static u16 joyCenter[2] = {2048, 2048};
 
 // ---- Efectos de sonido PWM en buzzer ---- {frecuencia, duración en ms}
 static const note_t sndPaddle[]   = { {1000, 25} };                        // "tic" agudo
@@ -175,9 +169,9 @@ static const note_t sndGameOver[] = { {784, 120}, {659, 120}, {523, 120}, {392, 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -189,19 +183,18 @@ void InputTask(void);
 void GameTask(void);
 void RenderTask(void);
 
-/* Utilidades de eventos */
+// Utilidades de eventos
 static u16  eventsWaitAndTake(eventHandler_t ev, u16 bits);
 static u16  eventsTake(eventHandler_t ev, u16 bits);
 
-/* Hardware */
+// Hardware
 static u32  buttonIsPressed(void);
 static u16  joystickReadRaw(u32 channel);
-static void joystickCalibrate(void);
 static void buzzerInit(void);
 static void buzzerTone(u16 freqHz);
 static void buzzerOff(void);
 
-/* Juego */
+// Juego
 static void gameReset(game_t *g);
 static void gameServe(game_t *g, s32 *vx, s32 *vy, s8 direction);
 static u32  randomNext(void);
@@ -239,15 +232,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   // El botón (PA8) ya lo configura MX_GPIO_Init()
   buzzerInit();
 
   HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
-  joystickCalibrate();               // ¡no tocar los joysticks al encender!
 
   ssd1306_Init();                    // usa HAL_Delay internamente
   ssd1306_Fill(Black);
@@ -533,7 +525,520 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* ==========================================================================
+ *                          UTILIDADES DE EVENTOS
+ * ========================================================================== */
 
+/**
+ * @brief Espera a que se active alguno de 'bits' y los consume (los borra).
+ * @details eventsWaitAny() siempre bloquea, aunque el bit ya esté activo. Para no
+ * perder un aviso, se revisa el bit y se llama a eventsWaitAny() dentro de una
+ * sección crítica: el bloqueo real (PendSV) ocurre al habilitar interrupciones,
+ * cuando la tarea ya está en la cola de espera. Así ningún eventsSetEvent()
+ * puede colarse entre la comprobación y la espera.
+ * @return bits que se activaron (y que fueron borrados)
+ */
+static u16 eventsWaitAndTake(eventHandler_t ev, u16 bits)
+{
+  u16 got = 0;
+  while (got == 0) {
+    portableDisableInterrupts();
+    if ((ev->events & bits) == 0) {
+      eventsWaitAny(ev, bits);          // encola la tarea; el cambio de contexto queda pendiente
+    }
+    portableEnableInterrupts();         // aquí se bloquea la tarea si no había bits
+    got = eventsTake(ev, bits);         // al despertar: leer y borrar
+  }
+  return got;
+}
+
+/**
+ * @brief Lee y borra de forma atómica los bits indicados, sin bloquear.
+ * @return bits que estaban activos
+ */
+static u16 eventsTake(eventHandler_t ev, u16 bits)
+{
+  portableDisableInterrupts();
+  u16 got = ev->events & bits;
+  if (got) {
+    eventsClearEvent(ev, got);
+  }
+  portableEnableInterrupts();
+  return got;
+}
+
+/* ==========================================================================
+ *                               HARDWARE
+ * ========================================================================== */
+
+static u32 buttonIsPressed(void)
+{
+  return (HAL_GPIO_ReadPin(BUTTON_PORT, BUTTON_PIN) == GPIO_PIN_RESET);   // activo en bajo
+}
+
+
+/**
+ * @brief Una conversión del ADC1 en el canal indicado (polling).
+ * @note  Solo la usa InputTask, por eso el ADC no necesita mutex.
+ */
+static u16 joystickReadRaw(u32 channel)
+{
+  ADC_ChannelConfTypeDef cfg = {0};
+  u16 value = 2048;
+
+  cfg.Channel      = channel;
+  cfg.Rank         = ADC_REGULAR_RANK_1;
+  cfg.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;   // potenciómetros de 10k: más tiempo de muestreo
+  cfg.SingleDiff   = ADC_SINGLE_ENDED;
+  cfg.OffsetNumber = ADC_OFFSET_NONE;
+  cfg.Offset       = 0;
+
+  if (HAL_ADC_ConfigChannel(&hadc1, &cfg) != HAL_OK) {
+    return value;
+  }
+
+  // Dos conversiones seguidas: la primera tras cambiar de canal puede arrastrar
+  // carga del canal anterior, así que se descarta y se usa la segunda.
+  for (u8 i = 0; i < 2; i++) {
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 5) == HAL_OK) {
+      value = (u16)HAL_ADC_GetValue(&hadc1);
+    }
+  }
+  HAL_ADC_Stop(&hadc1);
+  return value;
+}
+
+/** @brief Configura el contador del timer del buzzer a 1 MHz y arranca el PWM en silencio. */
+static void buzzerInit(void)
+{
+  // Reloj del timer: TIM2 está en APB1. Si el prescaler de APB1 es > 1, el timer va al doble.
+  u32 timClk = HAL_RCC_GetPCLK1Freq();
+  if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1) {
+    timClk *= 2U;
+  }
+  __HAL_TIM_SET_PRESCALER(&BUZZER_TIMER, (timClk / BUZZER_COUNTER_HZ) - 1U);
+  __HAL_TIM_SET_AUTORELOAD(&BUZZER_TIMER, 1000U - 1U);
+  __HAL_TIM_SET_COMPARE(&BUZZER_TIMER, BUZZER_CHANNEL, 0);        // 0 % = silencio
+  HAL_TIM_GenerateEvent(&BUZZER_TIMER, TIM_EVENTSOURCE_UPDATE);   // cargar el prescaler ya
+  HAL_TIM_PWM_Start(&BUZZER_TIMER, BUZZER_CHANNEL);
+}
+
+/** @brief Genera un tono cuadrado al 50 % (para buzzer pasivo). */
+static void buzzerTone(u16 freqHz)
+{
+  if (freqHz == 0U) {
+    buzzerOff();
+    return;
+  }
+  u32 arr = (BUZZER_COUNTER_HZ / freqHz) - 1U;
+  __HAL_TIM_SET_AUTORELOAD(&BUZZER_TIMER, arr);
+  __HAL_TIM_SET_COMPARE(&BUZZER_TIMER, BUZZER_CHANNEL, arr / 2U);
+  __HAL_TIM_SET_COUNTER(&BUZZER_TIMER, 0);   // evita que el contador quede por encima del nuevo ARR
+}
+
+static void buzzerOff(void)
+{
+  __HAL_TIM_SET_COMPARE(&BUZZER_TIMER, BUZZER_CHANNEL, 0);
+}
+
+/* ==========================================================================
+ *                             LÓGICA DEL JUEGO
+ * ========================================================================== */
+
+/** @brief Generador pseudoaleatorio simple (xorshift32). */
+static u32 randomNext(void)
+{
+  static u32 seed = 0;
+  if (seed == 0U) {
+    seed = (u32)portableGetSystemTicks() ^ 0xA5A5F00DU;
+    if (seed == 0U) seed = 1U;
+  }
+  seed ^= seed << 13;
+  seed ^= seed >> 17;
+  seed ^= seed << 5;
+  return seed;
+}
+
+/** @brief Deja el marcador en 0 y las paletas centradas. */
+static void gameReset(game_t *g)
+{
+  g->score[0] = 0;
+  g->score[1] = 0;
+  g->winner   = 0;
+  g->paddleY[0] = (SCREEN_H - PADDLE_H) / 2;
+  g->paddleY[1] = (SCREEN_H - PADDLE_H) / 2;
+  g->ballX = (SCREEN_W - BALL_SIZE) / 2;
+  g->ballY = (SCREEN_H - BALL_SIZE) / 2;
+  g->ballVisible = 0;
+}
+
+
+/**
+ * @brief Coloca la bola en el centro y le da velocidad hacia 'direction'.
+ * @param direction -1 = hacia el jugador 1 (izquierda), +1 = hacia el jugador 2 (derecha)
+ */
+static void gameServe(game_t *g, s32 *vx, s32 *vy, s8 direction)
+{
+  g->ballX = (SCREEN_W - BALL_SIZE) / 2;                    // centro horizontal
+  g->ballY = 8 + (s32)(randomNext() % (SCREEN_H - 16));     // altura al azar (8..55)
+  *vx = (direction < 0) ? -BALL_SPEED_X : BALL_SPEED_X;
+  *vy = (randomNext() & 1U) ? -BALL_SPEED_Y : BALL_SPEED_Y; // sube o baja al azar
+}
+/* ==========================================================================
+ *                                 TAREAS
+ * ========================================================================== */
+
+/**
+ * @brief InputTask: lee joysticks y botón cada 10 ms.
+ *  - Joysticks -> input.joy[] (protegido con inputMutex).
+ *  - Flanco de pulsación del botón (con antirrebote) -> evento EV_BTN_PRESSED.
+ */
+void InputTask(void)
+{
+  const u32 channels[2] = {JOY1_ADC_CHANNEL, JOY2_ADC_CHANNEL};
+  u32 btnState = 0;      // estado confirmado: 1 = presionado
+  u32 btnCount = 0;      // lecturas consecutivas distintas al estado confirmado
+
+  for (;;) {
+    /* ---- Joysticks: solo importa la dirección ---- */
+    s8 dir[2];
+    for (u8 j = 0; j < 2; j++) {
+      u16 raw = joystickReadRaw(channels[j]);
+
+      if (raw < JOY_CENTER - JOY_MARGIN)      dir[j] = -1;   // inclinado hacia un lado
+      else if (raw > JOY_CENTER + JOY_MARGIN) dir[j] = +1;   // inclinado hacia el otro
+      else                                    dir[j] = 0;    // dentro del margen: quieto
+#if JOY_INVERT_Y
+      dir[j] = (s8)-dir[j];
+#endif
+    }
+
+    MutexLock(&inputMutex);
+    input.joy[0] = dir[0];
+    input.joy[1] = dir[1];
+    MutexUnlock(&inputMutex);
+
+    /* ---- Botón START/STOP con antirrebote ---- */
+    u32 raw = buttonIsPressed();
+    if (raw != btnState) {
+      if (++btnCount >= BUTTON_DEBOUNCE_SAMPLES) {
+        btnState = raw;
+        btnCount = 0;
+        if (btnState) {                                 // solo al presionar, no al soltar
+          eventsSetEvent(&inputEvents, EV_BTN_PRESSED);
+        }
+      }
+    } else {
+      btnCount = 0;
+    }
+
+    taskDelay(MS_TO_TICKS(INPUT_PERIOD_MS));
+  }
+}
+
+/**
+ * @brief GameTask: bucle principal a 30 FPS.
+ * Trabaja sobre una copia privada 'g' y al final de cada frame la publica en
+ * 'game' con gameMutex (sección crítica corta). Luego avisa a RenderTask.
+ */
+void GameTask(void)
+{
+  game_t g;
+  s32 vx = 0, vy = 0;                  // velocidad de la bola (px/frame)
+  u32 serveCountdown = 0;
+  s8  serveDir = 1;
+  u64 startTicks = portableGetSystemTicks();
+  u64 frameIndex = 0;
+
+  MutexLock(&gameMutex);
+  g = game;
+  MutexUnlock(&gameMutex);
+
+  for (;;) {
+    u16 sounds = 0;
+
+    /* ---------- 1. Botón START/STOP ---------- */
+    if (eventsTake(&inputEvents, EV_BTN_PRESSED)) {
+      if (g.state == GAME_PLAYING) {
+        // Terminar la partida manualmente
+        g.state  = GAME_OVER;
+        g.winner = (g.score[0] > g.score[1]) ? 1 : (g.score[1] > g.score[0]) ? 2 : 0;
+        g.ballVisible = 0;
+        buzzerOff();
+        sounds |= EV_SND_GAMEOVER;
+      } else {
+        // Empezar una partida nueva (desde IDLE o GAME_OVER)
+        gameReset(&g);
+        g.state = GAME_PLAYING;
+        serveDir = (randomNext() & 1U) ? 1 : -1;
+        serveCountdown = SERVE_DELAY_FRAMES;
+        sounds |= EV_SND_START;
+      }
+    }
+
+    /* ---------- 2. Paletas (también se mueven en IDLE para probar los mandos) ---------- */
+    s16 joy[2];
+    MutexLock(&inputMutex);
+    joy[0] = input.joy[0];
+    joy[1] = input.joy[1];
+    MutexUnlock(&inputMutex);
+
+    // Fuera de la zona muerta, la paleta se mueve PADDLE_SPEED px en la dirección del joystick
+    for (u8 p = 0; p < 2; p++) {
+      if (joy[p] < 0)      g.paddleY[p] -= PADDLE_SPEED;   // baja
+      else if (joy[p] > 0) g.paddleY[p] += PADDLE_SPEED;   // sube
+
+      if (g.paddleY[p] < 0) g.paddleY[p] = 0;              // limites en el techo y en el piso
+      if (g.paddleY[p] > SCREEN_H - PADDLE_H) g.paddleY[p] = SCREEN_H - PADDLE_H;
+    }
+
+    /* ---------- 3. Bola ---------- */
+    if (g.state == GAME_PLAYING) {
+      if (serveCountdown > 0U) {
+        // Pausa antes del saque
+        serveCountdown--;
+        g.ballVisible = 0;
+        if (serveCountdown == 0U) {
+          gameServe(&g, &vx, &vy, serveDir);
+          g.ballVisible = 1;
+        }
+      } else {
+        s32 oldX = g.ballX;
+        g.ballX += vx;
+        g.ballY += vy;
+
+        // Paredes superior e inferior: la bola rebota invirtiendo vy
+        if (g.ballY < 0) {
+          g.ballY = -g.ballY;
+          vy = -vy;
+          sounds |= EV_SND_WALL;
+        } else if (g.ballY > SCREEN_H - BALL_SIZE) {
+          g.ballY = 2 * (SCREEN_H - BALL_SIZE) - g.ballY;
+          vy = -vy;
+          sounds |= EV_SND_WALL;
+        }
+
+        // Paletas: se comprueba si la bola cruzó la cara de la paleta en este frame
+        const s32 leftFace  = PADDLE_LEFT_X + PADDLE_W;      // x = 4  (cara derecha de la paleta 1)
+        const s32 rightFace = PADDLE_RIGHT_X - BALL_SIZE;    // x = 122 (bola pegada a la paleta 2)
+
+        s32 ballTop = g.ballY;
+        s32 ballBot = g.ballY + BALL_SIZE - 1;
+
+        for (u8 p = 0; p < 2; p++) {
+          u8 crossed = (p == 0) ? (vx < 0 && oldX >= leftFace  && g.ballX < leftFace)
+                                : (vx > 0 && oldX <= rightFace && g.ballX > rightFace);
+          if (!crossed) continue;
+
+          s32 padTop = g.paddleY[p];
+          s32 padBot = padTop + PADDLE_H - 1;
+          if (ballBot >= padTop && ballTop <= padBot) {
+            // Rebote: misma velocidad, sentido contrario
+            vx = -vx;
+            g.ballX = (p == 0) ? leftFace : rightFace;
+
+            // Si pega en la mitad de arriba de la paleta sale hacia arriba; abajo, hacia abajo
+            s32 ballCenter   = ballTop + BALL_SIZE / 2;
+            s32 paddleCenter = padTop + PADDLE_H / 2;
+            vy = (ballCenter < paddleCenter) ? -BALL_SPEED_Y : BALL_SPEED_Y;
+
+            sounds |= EV_SND_PADDLE;
+          }
+        }
+
+        // Punto: la bola salió por un lado
+        s8 scorer = -1;
+        if (g.ballX < -BALL_SIZE)        scorer = 1;   // salió por la izquierda: punto para el jugador 2
+        else if (g.ballX > SCREEN_W)     scorer = 0;   // salió por la derecha: punto para el jugador 1
+
+        if (scorer >= 0) {
+          g.score[scorer]++;
+          g.ballVisible = 0;
+          serveDir = (scorer == 0) ? 1 : -1;                  // saca hacia el que perdió el punto
+          if (g.score[scorer] >= WIN_SCORE) {
+            g.state  = GAME_OVER;
+            g.winner = (u8)(scorer + 1);
+            sounds |= EV_SND_GAMEOVER;
+          } else {
+            serveCountdown = SERVE_DELAY_FRAMES;
+            sounds |= EV_SND_SCORE;
+          }
+        }
+      }
+    }
+
+    g.frame++;
+
+    /* ---------- 4. Publicar el frame y avisar ---------- */
+    MutexLock(&gameMutex);
+    game = g;
+    MutexUnlock(&gameMutex);
+
+    eventsSetEvent(&frameEvents, EV_FRAME_READY);
+    if (sounds) {
+      eventsSetEvent(&soundEvents, sounds);
+    }
+
+    /* ---------- 5. Esperar al siguiente frame (30 FPS exactos en promedio) ---------- */
+    frameIndex++;
+    u64 nextFrame = startTicks + (frameIndex * RTOS_TICK_RATE_HZ) / GAME_FPS;
+    u64 now = portableGetSystemTicks();
+    if (nextFrame > now) {
+      taskDelay((u32)(nextFrame - now));
+    } else {
+      // Vamos atrasados (el dibujo tardó más que un frame): no acumular retraso
+      startTicks = now;
+      frameIndex = 0;
+      taskDelay(1);
+    }
+  }
+}
+
+/**
+ * @brief RenderTask: espera EV_FRAME_READY, copia el estado y dibuja.
+ * Es la ÚNICA tarea que usa la pantalla/I2C, así que el bus no necesita mutex.
+ * Tiene la prioridad más baja porque ssd1306_UpdateScreen() tarda ~25 ms.
+ */
+void RenderTask(void)
+{
+  game_t snapshot;
+
+  for (;;) {
+    eventsWaitAndTake(&frameEvents, EV_FRAME_READY);
+
+    MutexLock(&gameMutex);
+    snapshot = game;                 // copia rápida; el dibujo se hace sin el mutex
+    MutexUnlock(&gameMutex);
+
+    drawFrame(&snapshot);
+    ssd1306_UpdateScreen();
+  }
+}
+
+/**
+ * @brief SoundTask: espera eventos de sonido y toca el efecto más importante.
+ * Si llegan varios a la vez, gana el de mayor prioridad (fin > punto > inicio > paleta > pared).
+ */
+void SoundTask(void)
+{
+  for (;;) {
+    u16 ev = eventsWaitAndTake(&soundEvents, EV_SND_ALL);
+
+    const note_t *melody;
+    u8 len;
+    if      (ev & EV_SND_GAMEOVER) { melody = sndGameOver; len = ARRAY_LEN(sndGameOver); }
+    else if (ev & EV_SND_SCORE)    { melody = sndScore;    len = ARRAY_LEN(sndScore); }
+    else if (ev & EV_SND_START)    { melody = sndStart;    len = ARRAY_LEN(sndStart); }
+    else if (ev & EV_SND_PADDLE)   { melody = sndPaddle;   len = ARRAY_LEN(sndPaddle); }
+    else                           { melody = sndWall;     len = ARRAY_LEN(sndWall); }
+
+    for (u8 i = 0; i < len; i++) {
+      buzzerTone(melody[i].freqHz);
+      taskDelay(MS_TO_TICKS(melody[i].ms));
+    }
+    buzzerOff();
+  }
+}
+
+/* ==========================================================================
+ *                                 DIBUJO
+ * ========================================================================== */
+/***
+ * @brief Convierte un número de 8 bits a cadena de caracteres.
+ * @details Solo para valores 0..99. No usa sprintf() ni malloc(). Si value >= 10, se generan dos dígitos; si es < 10, un solo dígito. La cadena resultante siempre termina en '\0'.
+ * @param value Número a convertir.
+ * @param out Cadena de caracteres donde se almacenará el resultado.
+ */
+static void u8ToString(u8 value, char *out)
+{
+  if (value >= 10U) {
+    out[0] = (char)('0' + value / 10U);
+    out[1] = (char)('0' + value % 10U);
+    out[2] = '\0';
+  } else {
+    out[0] = (char)('0' + value);
+    out[1] = '\0';
+  }
+}
+
+static void drawCenteredText(char *text, u8 y, SSD1306_Font_t font)
+{
+  u8 len = 0;
+  while (text[len] != '\0') len++;
+  s32 x = ((s32)SCREEN_W - (s32)len * font.width) / 2;
+  if (x < 0) x = 0;
+  ssd1306_SetCursor((u8)x, y);
+  ssd1306_WriteString(text, font, White);
+}
+
+static void drawFrame(const game_t *g)
+{
+  char buf[4];
+
+  ssd1306_Fill(Black);
+
+  /* Paletas (siempre visibles, así se pueden probar los joysticks en cualquier pantalla) */
+  for (u8 p = 0; p < 2; p++) {
+    u8 x = (p == 0) ? PADDLE_LEFT_X : PADDLE_RIGHT_X;
+    u8 y = (u8)g->paddleY[p];
+    ssd1306_FillRectangle(x, y, x + PADDLE_W - 1, y + PADDLE_H - 1, White);
+  }
+
+  switch (g->state) {
+  case GAME_IDLE:
+    drawCenteredText("PONG", 8, Font_11x18);
+    drawCenteredText("My-Own-RTOS", 30, Font_6x8);
+    if ((g->frame / 15U) % 2U == 0U) {                 // parpadeo de 0.5 s
+      drawCenteredText("Presiona START", 50, Font_6x8);
+    }
+    break;
+
+  case GAME_PLAYING:
+    /* Red central discontinua */
+    for (u8 y = 0; y < SCREEN_H; y += 4) {
+      ssd1306_DrawPixel(SCREEN_W / 2 - 1, y, White);
+      ssd1306_DrawPixel(SCREEN_W / 2 - 1, y + 1, White);
+    }
+    /* Marcador */
+    u8ToString(g->score[0], buf);
+    ssd1306_SetCursor(SCREEN_W / 2 - 16, 1);
+    ssd1306_WriteString(buf, Font_7x10, White);
+    u8ToString(g->score[1], buf);
+    ssd1306_SetCursor(SCREEN_W / 2 + 9, 1);
+    ssd1306_WriteString(buf, Font_7x10, White);
+    /* Bola */
+    if (g->ballVisible) {
+      s32 bx = g->ballX;
+      s32 by = g->ballY;
+      if (bx >= 0 && bx <= SCREEN_W - BALL_SIZE && by >= 0 && by <= SCREEN_H - BALL_SIZE) {
+        ssd1306_FillRectangle((u8)bx, (u8)by, (u8)(bx + BALL_SIZE - 1), (u8)(by + BALL_SIZE - 1), White);
+      }
+    }
+    break;
+
+  case GAME_OVER:
+  default: {
+    char score[8];
+    u8 i = 0;
+    drawCenteredText("FIN DEL JUEGO", 2, Font_7x10);
+    u8ToString(g->score[0], buf);
+    for (u8 k = 0; buf[k]; k++) score[i++] = buf[k];
+    score[i++] = '-';
+    u8ToString(g->score[1], buf);
+    for (u8 k = 0; buf[k]; k++) score[i++] = buf[k];
+    score[i] = '\0';
+    drawCenteredText(score, 16, Font_11x18);
+    if (g->winner == 1)      drawCenteredText("GANA JUGADOR 1", 38, Font_6x8);
+    else if (g->winner == 2) drawCenteredText("GANA JUGADOR 2", 38, Font_6x8);
+    else                     drawCenteredText("EMPATE", 38, Font_6x8);
+    if ((g->frame / 15U) % 2U == 0U) {
+      drawCenteredText("START: jugar", 52, Font_6x8);
+    }
+    break;
+  }
+  }
+}
 /* USER CODE END 4 */
 
 /**
