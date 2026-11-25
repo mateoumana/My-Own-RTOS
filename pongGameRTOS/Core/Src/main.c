@@ -83,6 +83,7 @@ typedef struct {
 #define INPUT_PERIOD_MS         10U     //cada 10ms se lee el adc de cada joystick
 
 // ---------------- Pantalla y juego ----------------
+//SCK pin D15 - SDA pin D14
 #define SCREEN_W                SSD1306_WIDTH   // 128
 #define SCREEN_H                SSD1306_HEIGHT  // 64
 
@@ -95,6 +96,7 @@ typedef struct {
 #define BALL_SIZE               2   // bola de 2x2 px
 #define BALL_SPEED_X            2   // px por frame en horizontal (constante)
 #define BALL_SPEED_Y            1   // px por frame en vertical (+1 o -1)
+#define BALL_SPEED_Y_MAX        2   // velocidad máxima en vertical, para quitarle movimiento deterministico
 
 #define SERVE_DELAY_FRAMES      30U // después de cada punto, la bola desaparece durante 30 frames. A 30 FPS eso es 30 / 30 = 1 segundo para que los jugadores se preparen
 #define WIN_SCORE               5U  // el primero que llega a 5 gana y se pasa a la pantalla de fin del juego.s
@@ -841,7 +843,8 @@ void GameTask(void)
             // Si pega en la mitad de arriba de la paleta sale hacia arriba; abajo, hacia abajo
             s32 ballCenter   = ballTop + BALL_SIZE / 2;
             s32 paddleCenter = padTop + PADDLE_H / 2;
-            vy = (ballCenter < paddleCenter) ? -BALL_SPEED_Y : BALL_SPEED_Y;
+            s32 speedY       = 1 + (s32)(randomNext() % BALL_SPEED_Y_MAX);   // varia aleatoriamente entre 1 y BALL_SPEED_Y_MAX para cambiar el ángulo de rebote
+            vy = (ballCenter < paddleCenter) ? -speedY : speedY;
 
             sounds |= EV_SND_PADDLE;
           }
